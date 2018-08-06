@@ -1,0 +1,31 @@
+{
+	"name": "bdk/tinyframe",
+	"description": "Tiny Framework",
+	"keywords": ["framework"],
+	"homepage": "http://github.com/bkdotcom/TinyFrame",
+	"license": "MIT",
+	"authors": [
+		{
+			"name": "Brad Kent",
+			"email": "bkfake-github@yahoo.com",
+			"homepage": "http://www.bradkent.com/",
+			"role": "Developer"
+		}
+	],
+	"autoload": {
+		"classmap": [
+			"src/TinyFrame.php"
+		],
+		"psr-4": {
+			"bdk\\TinyFrame\\": "src/"
+		}
+	},
+	"require": {
+		"php": ">=5.4.0",
+        "bdk/form": "dev-master",
+		"bdk/toolbox": "dev-master",
+        "aura/router": "~3.0",
+        "guzzlehttp/psr7": "~1.4",
+		"pimple/pimple": "~3.0"
+	}
+}
