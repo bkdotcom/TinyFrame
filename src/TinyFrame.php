@@ -3,8 +3,10 @@
 namespace bdk;
 
 use bdk\TinyFrame\ServiceProvider;
+use Aura\Router\Route;
 use Pimple\Container;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 
 /**
  * TinyFramework
@@ -40,25 +42,21 @@ class TinyFrame
         if ($this->container->offsetExists($key)) {
             return $this->container[$key];
         }
-        /*
-        $getter = 'get'.\ucfirst($key);
-        if (\method_exists($this, $getter)) {
-            return $this->{$getter}();
-        }
-        $props = \get_object_vars($this);
-        foreach ($props as $prop) {
-            if (\is_object($prop) && \method_exists($prop, $getter)) {
-                return $prop->{$getter}();
-            }
-        }
-        */
         return null;
     }
 
+    /**
+     * Build & register routes from container['routes'] array
+     *
+     * @return void
+     */
 	public function buildRoutes()
 	{
         $map = $this->router->getMap();
-        $map->allows(['GET', 'POST']);
+        $map->allows(['GET', 'POST'])->defaults(array(
+            'action' => 'index',
+        ));
+        // $basePath = $this->container['config']['basePath'];
         foreach ($this->routes as $name => $props) {
             $route = $map->route($name, $props[0], $props[1]);
             foreach ($props as $k => $v) {
@@ -68,9 +66,9 @@ class TinyFrame
             }
             /*
                 Aura Router treats /foo/ differently from /foo
+                // only necessary if basePath??
             */
             if (\preg_match('#^(.*)\{/.+\}$#', $props[0], $matches)) {
-                $this->debug->log('adding slash route', $matches[1].'/');
                 $route = $map->route($name.'.index', $matches[1].'/', $props[1]);
                 foreach ($props as $k => $v) {
                     if (\is_string($k)) {
@@ -79,32 +77,116 @@ class TinyFrame
                 }
             }
         }
+        $map->route('undefinedRoute', '/')->wildcard('path')->special(array($this, 'undefinedRouteMatcher'));
 	}
 
-	public function dispatchRoute($route)
+    /**
+     * Special matching logic for fallback route
+     *
+     * @param ServerRequestInterface $request Request instance
+     * @param Route                  $route   Route instance
+     *
+     * @return boolean
+     */
+    public function undefinedRouteMatcher(ServerRequestInterface $request, Route $route)
+    {
+        $this->debug->group(__METHOD__);
+        $classExists = false;
+        /*
+            Find controller & action
+        */
+        $path = $route->attributes['path'];
+        $check = array();
+        if ($path) {
+            $check[] = array($path, 'index');
+        }
+        if (\count($path) > 1) {
+            $action = \array_pop($path);
+            $check[] = array($path, $action);
+        }
+        foreach ($check as $pathAction) {
+            list($path, $action) = $pathAction;
+            $count = \count($path);
+            $path[$count-1] = \ucfirst($path[$count-1]);
+            $classnameTest = '\\'.$this->container['config']['controllerNamespace'].'\\'.\implode('\\', $path);
+            if (\class_exists($classnameTest)) {
+                /*
+                    don't check if action is a valid method yet
+                */
+                $route->attributes(array(
+                    'action' => $action,
+                ))->handler($classnameTest);
+                $classExists = true;
+                break;
+            }
+        }
+        /*
+            Find default content filepath
+        */
+        $contentFilepath = $this->defaultContentFilepath($route);
+        if (!$contentFilepath && !$classExists) {
+            $route->attributes(array(
+                'action' => 'defaultAction',
+            ))->handler('\\bdk\\TinyFrame\\Controller');
+        }
+        $this->debug->groupEnd();
+        return $classExists || $contentFilepath;
+    }
+
+	/**
+     * [dispatchRoute description]
+     *
+     * @param Route $route Route instance
+     *
+     * @return void
+     */
+    public function dispatchRoute(Route $route)
 	{
         $this->debug->group(__METHOD__);
+        $this->debug->log('route', $route);
         $classname = $route->handler;
+        if ($classname{0} !== '\\') {
+            $classname = '\\'.$this->container['config']['controllerNamespace'].'\\'.$classname;
+        }
         $this->container['controller'] = new $classname($this->container);
+        foreach ($route->extras as $k => $v) {
+            $this->container['controller']->{$k} = $v;
+        }
         $action = 'action'.\ucfirst($route->attributes['action']);
+        if (!\method_exists($this->container['controller'], $action)) {
+            $this->debug->warn('method '.$action.' does not exist, using defaultAction');
+            $action = 'defaultAction';
+        }
         $this->debug->log(array(
-        	'controller' => $this->container['controller'],
-        	'action' => $action,
+            'controller' => $this->container['controller'],
+            'action' => $action,
         ));
         $this->container['controller']->{$action}();
         $this->debug->groupEnd();
 	}
 
-	public function getRequestRoute()
+	/**
+     * Find matching route for request
+     *
+     * @return Route
+     */
+    public function getRequestRoute()
 	{
-		$matcher = $this->router->getMatcher();
+		$this->debug->group(__METHOD__);
+        $this->debug->log('request', $this->request);
+        $matcher = $this->router->getMatcher();
         $route = $matcher->match($this->request);
         if (!$route) {
+            $this->debug->warn('404');
             $route = $matcher->getFailedRoute();
+        }
+        if (empty($route->extras['filepath'])) {
+            $this->defaultContentFilepath($route);
         }
         $action = $route->attributes['action'];
         $queryParams = $this->request->getQueryParams();
         if (isset($queryParams['action']) && $action == 'index') {
+            // use queryParam action
             $route->attributes(array(
                 'action'=>$queryParams['action'],
             ));
@@ -112,19 +194,30 @@ class TinyFrame
         foreach ($route->attributes as $k => $v) {
             $this->request = $this->request->withAttribute($k, $v);
         }
+        $this->debug->groupEnd();
         return $route;
 	}
 
-	public function run()
+	/**
+     * Output our page
+     *
+     * @return void
+     */
+    public function run()
 	{
-        $this->debug->log('request', $this->request);
         $this->buildRoutes();
         $route = $this->getRequestRoute();
-        $this->debug->log('route', $route);
-        $response = $this->dispatchRoute($route);
+        $this->dispatchRoute($route);
         // $this->sendResponse($response);
 	}
 
+    /**
+     * Output response
+     *
+     * @param ResponseInterface $response Response instance
+     *
+     * @return void
+     */
     public function sendResponse(ResponseInterface $response)
     {
         $httpLine = \sprintf(
@@ -146,5 +239,46 @@ class TinyFrame
         while (!$stream->eof()) {
             echo $stream->read(1024 * 8);
         }
+    }
+
+    /**
+     * Find default content filepath
+     *
+     * @param Route $route Rotue instance
+     *
+     * @return string|false
+     */
+    protected function defaultContentFilepath(Route $route)
+    {
+        if ($route->name != 'undefinedRoute') {
+            $path = \explode('\\', $route->handler);
+            $path = \array_map('strtolower', $path);
+            $filepaths = array(
+                $this->config['dirContent'].'/'.\implode('/', $path).'/'.$route->attributes['action'].'.php',
+            );
+            if (\count($path) == 1) {
+                $filepaths[] = $this->config['dirContent'].'/'.$route->attributes['action'].'.php';
+            }
+        } elseif ($route->attributes['path']) {
+            $path = $route->attributes['path'];
+            $filepaths = array(
+                $this->config['dirContent'].'/'.\implode('/', $path).'/index.php',
+                $this->config['dirContent'].'/'.\implode('/', $path).'.php',
+            );
+        } else {
+            $filepaths = array(
+                $this->config['dirContent'].'/index.php',
+            );
+        }
+        $this->debug->log('filepaths', $filepaths);
+        foreach ($filepaths as $filepath) {
+            if (\file_exists($filepath)) {
+                $route->extras(array(
+                    'filepath' => $filepath,
+                ));
+                return $filepath;
+            }
+        }
+        return false;
     }
 }

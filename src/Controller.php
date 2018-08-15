@@ -73,16 +73,6 @@ class Controller
         }
     }
 
-    public function actionIndex()
-    {
-        \ob_start();
-        require $this->config['dirContent'].'/index.php';
-        $this->body = \ob_get_clean();
-        $template = \file_get_contents($this->config['template']);
-        $this->debug->log('props', \array_keys(\get_object_vars($this)));
-        echo $this->renderer->render($template);
-    }
-
     /**
      * Output data json_encoded along with content-type header
      *
@@ -132,6 +122,25 @@ class Controller
         echo $json;
     }
 
+    /**
+     * Default/fallback action
+     *
+     * @return void
+     */
+    public function defaultAction()
+    {
+        \ob_start();
+        require $this->filepath;
+        $this->body = \ob_get_clean();
+        $template = \file_get_contents($this->config['template']);
+        echo $this->renderer->render($template);
+    }
+
+    /**
+     * Return debug output
+     *
+     * @return string
+     */
     public function getDebug()
     {
         return $this->debug->output();

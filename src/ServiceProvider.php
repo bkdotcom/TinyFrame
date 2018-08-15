@@ -15,7 +15,7 @@ class ServiceProvider implements ServiceProviderInterface
 {
 
     /**
-     * [register description]
+     * Register our "services"
      *
      * @param Container $container [description]
      *
