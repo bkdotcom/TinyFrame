@@ -43,7 +43,8 @@ class ServiceProvider implements ServiceProviderInterface
                 return ServerRequest::fromGlobals();
             },
             'router' => function ($container) {
-                $routerContainer = new RouterContainer($container['config']['basePath']);
+                $uriRoot = \rtrim($container['config']['uriRoot'], '/');
+                $routerContainer = new RouterContainer($uriRoot ?: null);
                 $routerContainer->setLoggerFactory(function () use ($container) {
                     return $container['debug']->logger;
                 });

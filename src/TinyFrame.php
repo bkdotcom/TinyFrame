@@ -26,7 +26,19 @@ class TinyFrame
         if (\is_array($container)) {
             $container = new Container($container);
         }
+        if (!isset($container['config'])) {
+            $container['config'] = array();
+        }
 		$this->container = $container;
+        $this->container['config'] = array_replace_recursive(array(
+            'uriRoot' => $this->getUriRoot(),
+            'uriContent' => $this->getUriContent(),
+            'dirRoot' => $this->getDirRoot(),
+            'dirContent' => $this->getDirContent(),
+            'template' => $this->getDirRoot().'/template.html',
+            'controllerNamespace' => null,
+        ), $container['config']);
+        $container['debug']->log('config', $container['config']);
         $this->container->register(new ServiceProvider());
 	}
 
@@ -251,8 +263,7 @@ class TinyFrame
     protected function defaultContentFilepath(Route $route)
     {
         if ($route->name != 'undefinedRoute') {
-            $path = \explode('\\', $route->handler);
-            $path = \array_map('strtolower', $path);
+            $path = \explode('\\', \strtolower($route->handler));
             $filepaths = array(
                 $this->config['dirContent'].'/'.\implode('/', $path).'/'.$route->attributes['action'].'.php',
             );
@@ -280,5 +291,60 @@ class TinyFrame
             }
         }
         return false;
+    }
+
+    protected function getDirRoot()
+    {
+        if (isset($this->container['config']['dirRoot'])) {
+            return $this->container['config']['dirRoot'];
+        }
+        $backtrace = \debug_backtrace(\DEBUG_BACKTRACE_IGNORE_ARGS);
+        $frame = \array_pop($backtrace);
+        return \dirname($frame['file']);
+    }
+
+    protected function getDirContent()
+    {
+        if (isset($this->container['config']['dirContent'])) {
+            return $this->container['config']['dirContent'];
+        }
+        return $this->getDirRoot().'/content';
+    }
+
+    protected function getUriRoot()
+    {
+        if (isset($this->container['config']['uriRoot'])) {
+            return $this->container['config']['uriRoot'];
+        }
+        $return = \dirname($_SERVER['SCRIPT_NAME']);
+        $return = \rtrim($return, '/').'/';
+        return $return;
+        // return \dirname($_SERVER['SCRIPT_NAME']).'/';
+        // $return = \preg_replace('#(\\\/|//)#', '/', $return);
+    }
+
+    protected function getUriContent()
+    {
+        if (isset($this->container['config']['uriContent'])) {
+            return $this->container['config']['uriContent'];
+        }
+        $dirDocRoot = \realpath($_SERVER['DOCUMENT_ROOT']);
+        $dirContent = $this->getDirContent();
+        $dirRoot = $this->getDirRoot();
+        if (\strpos($dirContent, $dirDocRoot) === 0) {
+            $this->debug->log('root is ancestor');
+            $return = substr($dirContent, \strlen($dirDocRoot));
+        } elseif (\strpos($dirContent, $dirRoot) === 0) {
+            $this->debug->log('site is ancestor');
+            $relpath = substr($dirContent, \strlen($dirRoot));
+            $return = \str_replace('//', '/', $this->getUriSite().$relpath);
+        } else {
+            $this->debug->warn('dirContent is outside of DocumentRoot and site directory ¯\_(ツ)_/¯');
+            // there's likely a symlink -> unable to resolve
+            $return = $this->getUriSite();
+        }
+        // make sure ends in a single /
+        $return = \rtrim($return, '/').'/';
+        return $return;
     }
 }

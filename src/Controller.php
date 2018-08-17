@@ -26,7 +26,7 @@ class Controller
      *
      * @return mixed
      */
-    public function &__get($key)
+    public function __get($key)
     {
         if ($this->container->offsetExists($key)) {
             $val = $this->container[$key];
@@ -42,14 +42,16 @@ class Controller
         */
         $getter = 'get'.\ucfirst($key);
         if (\method_exists($this, $getter)) {
-            $val = $this->{$getter}();
-            return $val;
+            return $this->{$getter}();
         }
         $props = \get_object_vars($this);
         foreach ($props as $prop) {
             if (\is_object($prop) && \method_exists($prop, $getter)) {
                 return $prop->{$getter}();
             }
+        }
+        if (isset($this->container['config'][$key])) {
+            return $this->container['config'][$key];
         }
         $val = null;
         return $val;
@@ -71,6 +73,10 @@ class Controller
             // return !\is_null($this->{$getter}());
             return true;
         }
+        if (isset($this->container['config'][$key])) {
+            return true;
+        }
+        return false;
     }
 
     /**
