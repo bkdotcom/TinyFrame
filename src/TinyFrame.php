@@ -2,11 +2,13 @@
 
 namespace bdk;
 
+use bdk\TinyFrame\Controller;
 use bdk\TinyFrame\ServiceProvider;
+use bdk\TinyFrame\Exception\ExitException;
 use Aura\Router\Route;
 use Pimple\Container;
 use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
+use bdk\TinyFrame\Request;
 
 /**
  * TinyFramework
@@ -30,7 +32,7 @@ class TinyFrame
             $container['config'] = array();
         }
 		$this->container = $container;
-        $this->container['config'] = array_replace_recursive(array(
+        $this->container['config'] = \array_replace_recursive(array(
             'uriRoot' => $this->getUriRoot(),
             'uriContent' => $this->getUriContent(),
             'dirRoot' => $this->getDirRoot(),
@@ -95,12 +97,12 @@ class TinyFrame
     /**
      * Special matching logic for fallback route
      *
-     * @param ServerRequestInterface $request Request instance
-     * @param Route                  $route   Route instance
+     * @param Reqquest $request Request instance
+     * @param Route    $route   Route instance
      *
      * @return boolean
      */
-    public function undefinedRouteMatcher(ServerRequestInterface $request, Route $route)
+    public function undefinedRouteMatcher(Request $request, Route $route)
     {
         $this->debug->group(__METHOD__);
         $classExists = false;
@@ -150,7 +152,7 @@ class TinyFrame
      *
      * @param Route $route Route instance
      *
-     * @return void
+     * @return Response
      */
     public function dispatchRoute(Route $route)
 	{
@@ -164,18 +166,104 @@ class TinyFrame
         foreach ($route->extras as $k => $v) {
             $this->container['controller']->{$k} = $v;
         }
-        $action = 'action'.\ucfirst($route->attributes['action']);
-        if (!\method_exists($this->container['controller'], $action)) {
-            $this->debug->warn('method '.$action.' does not exist, using defaultAction');
-            $action = 'defaultAction';
+        $method = 'action'.\ucfirst($route->attributes['action']);
+        if (!\method_exists($this->container['controller'], $method)) {
+            $this->debug->warn('method '.$method.' does not exist, using defaultAction');
+            $method = 'defaultAction';
         }
         $this->debug->log(array(
             'controller' => $this->container['controller'],
-            'action' => $action,
+            'method' => $method,
         ));
-        $this->container['controller']->{$action}();
+        $response = $this->doMethod($this->container['controller'], $method);
+        $this->debug->log('response', $response);
         $this->debug->groupEnd();
+        return $response;
 	}
+
+    /**
+     * [doMethod description]
+     *
+     * @param Controller $controller Controller instance
+     * @param string     $method     method to call
+     *
+     * @return ResponseInterface
+     * @throws Exception\InvalidArgument
+     */
+    public function doMethod(Controller $controller, $method)
+    {
+        \bdk\Debug::_log(__METHOD__, $method);
+        $return = '';
+        try {
+            $refMethod =new \ReflectionMethod($controller, $method);
+            $argValues = $this->getMethodArgValues($refMethod);
+            \ob_start();
+            $return = $refMethod->invokeArgs($controller, $argValues);
+            $output = \ob_get_clean();
+        } catch (ExitException $e) {
+            $this->debug->info('caught ExitException');
+            $output = \ob_get_clean();
+        }
+        try {
+            $stream = $controller->response->getBody();
+            $stream->rewind();
+            if ($stream->read(1) !== '') {
+                $this->debug->info('have response body');
+                return $controller->response;
+            }
+        } catch (\RuntimeException $e) {
+            // foo
+            $this->debug->warn($e);
+        }
+        if ($return) {
+            $this->debug->info('have return value');
+            return $this->response->withBody(\GuzzleHttp\Psr7\stream_for($return));
+        }
+        if ($output) {
+            $this->debug->info('have buffered output');
+            return $this->response->withBody(\GuzzleHttp\Psr7\stream_for($output));
+        }
+        $this->debug->warn('no output');
+    }
+
+    /**
+     * Get parameter values to pass to method
+     *
+     * We first look at request attributes & then request query parameters
+     *
+     * @param \ReflectionMethod $refMethod reflection method
+     *
+     * @return mixed[]
+     * @throws Exception\InvalidArgument
+     */
+    protected function getMethodArgValues(\ReflectionMethod $refMethod)
+    {
+        $argValues = array();
+        $this->debug->log('getMethodArgValues', $this->request);
+        foreach ($refMethod->getParameters() as $param) {
+            $name = $param->getName();
+            $val = $this->request->getAttribute($name);
+            if ($val === null) {
+                $val = $this->request->getQueryParam($name);
+            }
+            if ($val !== null) {
+                if ($param->isArray()) {
+                    $argValues[] = \is_array($val)
+                        ? $val
+                        : array($val);
+                } elseif (!\is_array($val)) {
+                    $argValues[] = $val;
+                } else {
+                    throw new Exception\InvalidArgument();
+                }
+            } elseif ($param->isDefaultValueAvailable()) {
+                $argValues[] = $param->getDefaultValue();
+            } else {
+                throw new Exception\InvalidArgument();
+            }
+        }
+        return $argValues;
+    }
 
 	/**
      * Find matching route for request
@@ -219,8 +307,8 @@ class TinyFrame
 	{
         $this->buildRoutes();
         $route = $this->getRequestRoute();
-        $this->dispatchRoute($route);
-        // $this->sendResponse($response);
+        $response = $this->dispatchRoute($route);
+        $this->sendResponse($response);
 	}
 
     /**
@@ -232,6 +320,7 @@ class TinyFrame
      */
     public function sendResponse(ResponseInterface $response)
     {
+        $this->debug->info(__METHOD__);
         $httpLine = \sprintf(
             'HTTP/%s %s %s',
             $response->getProtocolVersion(),
@@ -241,7 +330,7 @@ class TinyFrame
         \header($httpLine, true, $response->getStatusCode());
         foreach ($response->getHeaders() as $name => $values) {
             foreach ($values as $value) {
-                \header("$name: $value", false);
+                \header($name.': '.$value, false);
             }
         }
         $stream = $response->getBody();
@@ -333,10 +422,10 @@ class TinyFrame
         $dirRoot = $this->getDirRoot();
         if (\strpos($dirContent, $dirDocRoot) === 0) {
             $this->debug->log('root is ancestor');
-            $return = substr($dirContent, \strlen($dirDocRoot));
+            $return = \substr($dirContent, \strlen($dirDocRoot));
         } elseif (\strpos($dirContent, $dirRoot) === 0) {
             $this->debug->log('site is ancestor');
-            $relpath = substr($dirContent, \strlen($dirRoot));
+            $relpath = \substr($dirContent, \strlen($dirRoot));
             $return = \str_replace('//', '/', $this->getUriSite().$relpath);
         } else {
             $this->debug->warn('dirContent is outside of DocumentRoot and site directory ¯\_(ツ)_/¯');

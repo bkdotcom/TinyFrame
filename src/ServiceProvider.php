@@ -4,7 +4,8 @@ namespace bdk\TinyFrame;
 
 use Aura\Router\RouterContainer;
 use bdk\Debug;
-use GuzzleHttp\Psr7\ServerRequest;
+use bdk\TinyFrame\Request;
+use GuzzleHttp\Psr7\Response;
 use Pimple\Container;
 use Pimple\ServiceProviderInterface;
 
@@ -40,8 +41,17 @@ class ServiceProvider implements ServiceProviderInterface
                 return new Renderer($container['controller']);
             },
             'request' => function () {
-                return ServerRequest::fromGlobals();
+                // allow "." & ' ' in keys
+                $getBackup = $_GET;
+                $_GET = \bdk\Str::parse($_SERVER['QUERY_STRING']);
+                $request = Request::fromGlobals();
+                $_GET = $getBackup;
+                return $request;
             },
+            // Response is immutable...
+            'response' => $container->factory(function () {
+                return new Response();
+            }),
             'router' => function ($container) {
                 $uriRoot = \rtrim($container['config']['uriRoot'], '/');
                 $routerContainer = new RouterContainer($uriRoot ?: null);

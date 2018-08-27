@@ -23,6 +23,7 @@
 	"require": {
 		"php": ">=5.4.0",
         "bdk/form": "dev-master",
+        "bdk/simplecache": "dev-master",
 		"bdk/toolbox": "dev-master",
         "aura/router": "~3.0",
         "guzzlehttp/psr7": "~1.4",

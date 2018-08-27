@@ -3,6 +3,7 @@
 namespace bdk\TinyFrame;
 
 use Pimple\Container;
+use bdk\TinyFrame\Exception\ExitException;
 
 class Controller
 {
@@ -57,6 +58,26 @@ class Controller
         return $val;
     }
 
+    /*
+    public function __set($key, $val)
+    {
+        if ($this->container->offsetExists($key)) {
+            // probably "frozen"
+            unset($this->container[$key]);
+            $this->container[$key] = $val;
+        } else {
+            $this->{$key} = $val;
+        }
+    }
+    */
+
+    /**
+     * Magic method
+     *
+     * @param string $key key to check
+     *
+     * @return boolean
+     */
     public function __isset($key)
     {
         if ($this->container->offsetExists($key)) {
@@ -80,35 +101,13 @@ class Controller
     }
 
     /**
-     * Output data json_encoded along with content-type header
-     *
-     * @param array $data data to include in response
-     *
-     * @return void
-     */
-    public function ajaxSuccess($data = array())
-    {
-        $json = \json_encode(
-            array(
-                'success' => true,
-            ) + $data
-        );
-        if (isset($_GET['callback'])) {
-            $json = $_GET['callback'] . '(' . $json . ')';
-            \header('Content-type: application/javascript');
-        } else {
-            \header('Content-type: application/json');
-        }
-        echo $json;
-    }
-
-    /**
      * Output message & data json_encoded along with content-type header
      *
      * @param string $message error message
      * @param array  $data    data to include in response
      *
      * @return void
+     * @throws ExitException
      */
     public function ajaxError($message = '', $data = array())
     {
@@ -120,18 +119,52 @@ class Controller
             $data
         ));
         if (isset($_GET['callback'])) {
-            $json = $_GET['callback'] . '(' . $json . ')';
-            \header('Content-type: application/javascript');
+            $stream = \GuzzleHttp\Psr7\stream_for($_GET['callback'] . '(' . $json . ')');
+            $this->response = $this->response
+                ->withBody($stream)
+                ->withHeader('Content-type', 'application/javascript');
         } else {
-            \header('Content-type: application/json');
+            $stream = \GuzzleHttp\Psr7\stream_for($json);
+            $this->response = $this->response
+                ->withBody($stream)
+                ->withHeader('Content-type', 'application/json');
         }
-        echo $json;
+        throw new ExitException();
+    }
+
+    /**
+     * Output data json_encoded along with content-type header
+     *
+     * @param array $data data to include in response
+     *
+     * @return void
+     * @throws ExitException
+     */
+    public function ajaxSuccess($data = array())
+    {
+        $json = \json_encode(
+            array(
+                'success' => true,
+            ) + $data
+        );
+        if (isset($_GET['callback'])) {
+            $stream = \GuzzleHttp\Psr7\stream_for($_GET['callback'] . '(' . $json . ')');
+            $this->response = $this->response
+                ->withBody($stream)
+                ->withHeader('Content-type', 'application/javascript');
+        } else {
+            $stream = \GuzzleHttp\Psr7\stream_for($json);
+            $this->response = $this->response
+                ->withBody($stream)
+                ->withHeader('Content-type', 'application/json');
+        }
+        throw new ExitException();
     }
 
     /**
      * Default/fallback action
      *
-     * @return void
+     * @return string
      */
     public function defaultAction()
     {
@@ -139,7 +172,7 @@ class Controller
         require $this->filepath;
         $this->body = \ob_get_clean();
         $template = \file_get_contents($this->config['template']);
-        echo $this->renderer->render($template);
+        return $this->renderer->render($template);
     }
 
     /**
