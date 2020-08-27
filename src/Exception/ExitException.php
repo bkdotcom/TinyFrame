@@ -3,7 +3,7 @@
 namespace bdk\TinyFrame\Exception;
 
 /**
- * Throw and Exit exception rather than calling exit()
+ * Throw Exit exception rather than calling exit()
  *
  * Class can't be called "Exit" - reserved word
  */

@@ -4,6 +4,8 @@ namespace bdk\TinyFrame;
 
 use Aura\Router\RouterContainer;
 use bdk\Debug;
+use bdk\Debug\LogEntry;
+use bdk\Session;
 use bdk\TinyFrame\Request;
 use GuzzleHttp\Psr7\Response;
 use Pimple\Container;
@@ -26,19 +28,48 @@ class ServiceProvider implements ServiceProviderInterface
     {
         $services = array(
             'alerts' => function ($container) {
-                return new Alerts($container['eventManager']);
+                $alerts = new Alerts($container['eventManager']);
+                $sessionAlerts = $container['session']->get('alerts');
+                if ($sessionAlerts) {
+                    foreach ($sessionAlerts as $alert) {
+                        $alerts->add($alert);
+                    }
+                    $container['session']->remove('alerts');
+                }
+                return $alerts;
+            },
+            'auraRouterContainer' => function ($container) {
+                $uriRoot = \rtrim($container['config']['uriRoot'], '/');
+                $routerContainer = new RouterContainer($uriRoot ?: null);
+                /*
+                $routerContainer->setLoggerFactory(function () use ($container) {
+                    $debug = $container['debug']->getChannel('Aura');
+                    $debug->eventManager->subscribe(Debug::EVENT_OUTPUT_LOG_ENTRY, function (LogEntry $logEntry) {
+                        // Debug::_warn('logEntry', $logEntry);
+                        $logEntry->setMeta('icon', 'fa fa-random');
+                    });
+                    return $debug->logger;
+                });
+                */
+                return $routerContainer;
+            },
+            'content' => function ($container) {
+                return new Content($container);
             },
             'debug' => function () {
                 return Debug::getInstance();
+            },
+            'errorHandler' => function ($container) {
+                return $container['debug']->errorHandler;
             },
             'eventManager' => function ($container) {
                 return $container['debug']->eventManager;
             },
             'head' => function ($container) {
-                return new Head($container['renderer'], $container['debug']);
+                return new Head($container);
             },
             'renderer' => function ($container) {
-                return new Renderer($container['controller']);
+                return new Renderer($container);
             },
             'request' => function () {
                 // allow "." & ' ' in keys
@@ -52,13 +83,14 @@ class ServiceProvider implements ServiceProviderInterface
             'response' => $container->factory(function () {
                 return new Response();
             }),
+            'route' => function ($container) {
+                return $container['router']->getRequestRoute($container['request']);
+            },
             'router' => function ($container) {
-                $uriRoot = \rtrim($container['config']['uriRoot'], '/');
-                $routerContainer = new RouterContainer($uriRoot ?: null);
-                $routerContainer->setLoggerFactory(function () use ($container) {
-                    return $container['debug']->logger;
-                });
-                return $routerContainer;
+                return new Router($container['auraRouterContainer'], $container);
+            },
+            'session' => function () {
+                return new Session();
             },
         );
         foreach ($services as $k => $v) {

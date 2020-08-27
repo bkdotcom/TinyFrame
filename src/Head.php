@@ -9,42 +9,11 @@ use bdk\Html;
 /**
  * Head
  */
-class Head // implements ExtensionInterface
+class Head extends Component implements ContentInterface
 {
 
-    protected $debug;
-    protected $renderer;
-    // protected $htmlObj;
-    // protected $page;
-    // protected $site;
     protected $tags = array();
     protected $addDefaultAttribs = true;
-
-    /**
-     * Constructor
-     *
-     * @param \bdk\TinyFrame\Renderer $renderer renderer instance
-     * @param \bdk\debug              $debug    debug instance
-     */
-    public function __construct($renderer, $debug)
-    {
-        $this->renderer = $renderer;
-        $this->debug = $debug;
-    }
-
-    /**
-     * [setPage description]
-     *
-     * @param object $page page
-     *
-     * @return void
-     */
-    /*
-    public function setPage($page)
-    {
-        $this->page = $page;
-    }
-    */
 
     /**
      * add meta, script, base, stylesheet, and other <link rel="xxx"> tags
@@ -74,16 +43,18 @@ class Head // implements ExtensionInterface
         $this->tags[] = $attribs;
         $contentKey = $attribs['tagname'] == 'base'
             ? 'tagsMeta'
-            : 'tags'.\ucfirst($attribs['tagname']);
+            : 'tags' . \ucfirst($attribs['tagname']);
         $isTokenRendered = $this->renderer->isTokenRendered($contentKey);
+        // $this->debug->warn('isTokenRendered', $contentKey, $isTokenRendered);
         if ($attribs['tagname'] == 'script' && !$isTokenRendered) {
             // also check for tagsScriptTrue / tagsScriptFalse
-            $defer = isset($attribs['defer']) && $attribs['defer'] ? 'True' : 'False';
-            $contentKey = 'tagsScript'.$defer;
+            $defer = isset($attribs['defer']) && $attribs['defer'] ? ' true' : ' false';
+            $contentKey = 'tagsScript' . $defer;
             // $already_out = isset($this->content[$contentKey]);
             $isTokenRendered = $this->renderer->isTokenRendered($contentKey);
         }
         if ($isTokenRendered) {
+            // $this->debug->warn('add tag rendered!!!!!');
             $this->addTagRendered($contentKey, $attribs);
         }
         return;
@@ -121,6 +92,15 @@ class Head // implements ExtensionInterface
     }
     */
 
+    public function getContentGenerators()
+    {
+        return array(
+            'getTagsLink',
+            'getTagsMeta',
+            'getTagsScript',
+        );
+    }
+
     /**
      * build string of <link> tags
      * automatically adds default rel=canonical and rel=up  [via get_link() -> params will not be included]
@@ -141,7 +121,6 @@ class Head // implements ExtensionInterface
             collect the link tags
         */
         $tags = $this->findTags('link');
-        // $this->debug->table('tags', $tags);
         $tagsGrouped = array();    // group tags by rel attrib
         foreach ($tags as $tag) {
             $rel = $tag['rel'];
@@ -171,18 +150,42 @@ class Head // implements ExtensionInterface
             $tags[] = $this->getTagsLinkCan();
         }
         // sort the tags (don't sort by href!  order matters)
-        $tags = array_filter($tags);
+        $tags = \array_filter($tags);
         $tags = ArrayUtil::fieldSort($tags, array('rel','type'));
-        $this->debug->info('tags', $tags);
-        $this->debug->table('tagsLink', $tags);
         foreach ($tags as $attribs) {
             $this->tags[] = $attribs;
             $tagname = $attribs['tagname'];
             unset($attribs['tagname']);
-            $str .= Html::buildTag($tagname, $attribs)."\n\t";
+            $str .= $this->buildTag($tagname, $attribs) . "\n\t";
         }
         $str = \rtrim($str);
         return $str;
+    }
+
+    protected function buildTag($tagname, $attribs)
+    {
+        if ($tagname == 'script' && $attribs['type'] == 'text/javascript') {
+            $attribs['type'] = null; // type attribute is unnecessary for JavaScript resources
+        }
+        if ($tagname === 'style' && $attribs['type'] == 'text/css') {
+            $attribs['type'] = null;    // The type attribute for the style element is not needed and should be omitted
+        }
+        if (isset($attribs['href'])) {
+            // make sure url is properly encoded
+            $urlParts = Html::parseUrl($attribs['href']);
+            // $this->debug->log('urlParts', $urlParts);
+            if ($urlParts['params']) {
+                if (!$urlParts['scheme']) {
+                    $urlParts['scheme'] = 'omit';
+                }
+                unset($attribs['query']);
+                // if (!$urlParts['scheme']) {
+                    // $urlParts['scheme'] = 'omit';
+                // }
+                $attribs['href'] = Html::buildUrl($urlParts);
+            }
+        }
+        return Html::buildTag($tagname, $attribs);
     }
 
     /**
@@ -205,7 +208,7 @@ class Head // implements ExtensionInterface
             'og:image'      => null,            // image URL - The image must be at least 50px by 50px and have a maximum aspect ratio of 3:1. We support PNG, JPEG and GIF formats.
             'og:url'        => null,            // same as link rel="canonical"
             'og:site_name'  => null,            // array_path($GLOBALS, 'site/name'),
-            'og:description'=> null,            // pretty much equivalent to meta description
+            'og:description' => null,            // pretty much equivalent to meta description
             // fb:admins
             // fb:app_id
         );
@@ -216,13 +219,12 @@ class Head // implements ExtensionInterface
             newer overwrites previous
         */
         $tags = $this->findTags(array('meta','base'));
-        $this->debug->table('tags', $tags);
         foreach ($tags as $tag) {
             if ($tag['tagname'] == 'meta') {
                 $keys = \array_diff(\array_keys($tag), array('tagname','content'));
                 $key = \reset($keys);
                 $key = $key == 'http-equiv'
-                    ? $key.' '.$tag[ $key ]
+                    ? $key . ' ' . $tag[ $key ]
                     : $tag[ $key ];
                 $tagsMeta[$key] = $tag;
             } elseif ($tag['tagname'] == 'base') {
@@ -231,25 +233,21 @@ class Head // implements ExtensionInterface
                 $tagsBase[$key] = $tag;
             }
         }
-        $this->debug->log('boop');
         $tagsMeta = $this->getTagsMetaClean($tagsMeta);
         \ksort($tagsMeta);
-        $this->debug->table('tagsMeta', $tagsMeta);
-        $this->debug->table('tagsBase', $tagsBase);
         foreach ($tagsMeta as $attribs) {
             $this->tags[] = $attribs;
             $tagname = $attribs['tagname'];
             unset($attribs['tagname']);
-            $str .= Html::buildTag($tagname, $attribs)."\n\t";
+            $str .= $this->buildTag($tagname, $attribs) . "\n\t";
         }
         foreach ($tagsBase as $attribs) {
             $this->tags[] = $attribs;
             $tagname = $attribs['tagname'];
             unset($attribs['tagname']);
-            $str .= Html::buildTag($tagname, $attribs)."\n\t";
+            $str .= $this->buildTag($tagname, $attribs) . "\n\t";
         }
         $str = \rtrim($str); // remove final "\n\t"
-        // $this->debug->log('str', $str);
         $this->debug->groupEnd();
         return $str;
     }
@@ -271,7 +269,6 @@ class Head // implements ExtensionInterface
      */
     public function getTagsScript($defered = null)
     {
-        // $this->debug->groupCollapsed(__CLASS__.'->'.__FUNCTION__, $defered);
         $str = '';
         if (\is_string($defered)) {
             $defered = $defered === 'true';
@@ -293,9 +290,12 @@ class Head // implements ExtensionInterface
         }
         foreach ($tags as $attribs) {
             $this->tags[] = $attribs;
-            if ($defered === null
-                || $defered && !empty($attribs['defer'])
-                || !$defered && empty($attribs['defer'])
+            if (
+                $defered === null
+                || $defered
+                    && !empty($attribs['defer'])
+                || !$defered
+                    && empty($attribs['defer'])
             ) {
                 // unset($tag['data-sort']);   // don't output the data-sort attrib
                 if ($defered === true) {
@@ -303,12 +303,10 @@ class Head // implements ExtensionInterface
                 }
                 $tagname = $attribs['tagname'];
                 unset($attribs['tagname']);
-                $str .= Html::buildTag($tagname, $attribs)."\n\t";
+                $str .= $this->buildTag($tagname, $attribs) . "\n\t";
             }
         }
         $str = \rtrim($str);
-        // $this->debug->log('str', $str);
-        // $this->debug->groupEnd();
         return $str;
     }
 
@@ -336,7 +334,6 @@ class Head // implements ExtensionInterface
      */
     protected function addTagRendered($contentKey, $attribs)
     {
-        // $this->debug->groupCollapsed(__CLASS__.'->'.__FUNCTION__);
         $isTagAlreadyIncluded = false;
         $search = array();
         if ($attribs['tagname'] == 'link') {
@@ -356,14 +353,12 @@ class Head // implements ExtensionInterface
                 $isTagAlreadyIncluded = true;
             }
         }
-        // $this->debug->log('isTagAlreadyIncluded', $isTagAlreadyIncluded);
         if (!$isTagAlreadyIncluded) {
             $tagname = $attribs['tagname'];
             unset($attribs['tagname']);
-            $tag = Html::buildTag($tagname, $attribs);
-            $this->page->content->update($contentKey, $tag);
+            $tag = $this->buildTag($tagname, $attribs);
+            $this->content->update($contentKey, $tag);
         }
-        // $this->debug->groupEnd();
     }
 
     /**
@@ -415,7 +410,7 @@ class Head // implements ExtensionInterface
                 'url'   => $url,
                 // 'scheme' => $this->site->isSecured ? 'https' : 'http',
                 'host'  => \preg_match('/^\w+\.\w+$/', $_SERVER['HTTP_HOST'])
-                            ? 'www.'.$_SERVER['HTTP_HOST']
+                            ? 'www.' . $_SERVER['HTTP_HOST']
                             : $_SERVER['HTTP_HOST'],
             ));
         }
@@ -438,7 +433,7 @@ class Head // implements ExtensionInterface
         return array(
             'tagname' => 'link',
             'rel'   => 'up',
-            'href'  => $this->site->getLink($pathUp),
+            'href'  => $this->router->getUrl($pathUp),
         );
         */
     }
@@ -450,14 +445,13 @@ class Head // implements ExtensionInterface
      */
     protected function getTagsLinkCan()
     {
-        /*
-        // $this->debug->log('creating can path');
-        return array(
+        $link =  array(
             'tagname' => 'link',
             'rel' => 'canonical',
-            'href' => $this->site->getLink($this->page->properties['path'], array(), array('fullUrl'=>true)),
+            'href' => $this->router->getUrl($this->route->name, $this->route->attributes, array('fullUrl' => true)),
         );
-        */
+        // $this->debug->warn('canonical!!!!!!!!!', $link);
+        return $link;
     }
 
     /**
@@ -475,7 +469,10 @@ class Head // implements ExtensionInterface
         if (empty($tagsMeta['og:url']['content'])) {
             // og:url is equivalent to <link rel="canonical">
             $this->getTagsLink();
-            $found = ArrayUtil::searchFields($this->tags, array('tagname'=>'link','rel'=>'canonical'));
+            $found = ArrayUtil::searchFields($this->tags, array(
+                'tagname' => 'link',
+                'rel' => 'canonical',
+            ));
             $found = \reset($found);
             if ($found) {
                 $tagsMeta['og:url'] = $found['href'];
@@ -535,7 +532,7 @@ class Head // implements ExtensionInterface
                     'gif' => 'image/gif',
                     'ico' => 'image/vnd.microsoft.icon',
                     'jpg' => 'image/jpeg',
-                    'jpeg'=> 'image/jpeg',
+                    'jpeg' => 'image/jpeg',
                     'png' => 'image/png',
                     'tif' => 'image/tiff',
                     'tiff' => 'image/tiff',
@@ -615,7 +612,9 @@ class Head // implements ExtensionInterface
                 } elseif ($attribs['tagname'] == 'script') {
                     $key = 'src';
                 } elseif ($attribs['tagname'] == 'link') {
-                    $key = 'href';
+                    $key = !isset($attribs['rel']) && \count($args) == 3
+                        ? 'rel'
+                        : 'href';
                 } elseif ($attribs['tagname'] == 'base') {
                     $key = $arg;
                     $arg = $args[2];

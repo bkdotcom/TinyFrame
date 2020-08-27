@@ -2,7 +2,6 @@
 
 namespace bdk\TinyFrame;
 
-use bdk\Net;
 use bdk\PubSub\Event;
 use bdk\PubSub\Manager;
 use bdk\PubSub\SubscriberInterface;
@@ -10,10 +9,9 @@ use bdk\PubSub\SubscriberInterface;
 /**
  * Page Alerts
  */
-class Alerts implements SubscriberInterface
+class Alerts implements ContentInterface, SubscriberInterface
 {
 
-	protected $debug;
 	protected $alerts = array();
 	protected $alertsOutput = array();
 
@@ -81,8 +79,7 @@ class Alerts implements SubscriberInterface
 			'output'		=> '',
 		), $alert);
 		$alert['class'] = 'alert-'.$alert['class'];
-		$event = $this->eventManager->publish('alerts.build', null, $alert);
-		$alert = $event->getValues();
+		$alert = $this->eventManager->publish('alerts.build', null, $alert)->getValues();
 		if (!empty($alert['output'])) {
 			return $alert['output'];
 		}
@@ -144,7 +141,7 @@ class Alerts implements SubscriberInterface
 			// wrap the alerts?
 			/*
 			if ($tmplFramework == 'jQmobile') {
-				$swatch = !isset($GLOBALS['page']['jqm_ver']) || version_compare($GLOBALS['page']['jqm_ver'], '1.4.0', '>=')
+				$swatch = !isset($GLOBALS['page']['jqm_ver']) || \version_compare($GLOBALS['page']['jqm_ver'], '1.4.0', '>=')
 					? 'ui-bar-y'
 					: 'ui-bar-e';
 				$str = '<div class="ui-header ui-bar '.$swatch.' alerts">'.$str.'</div>';
@@ -153,13 +150,20 @@ class Alerts implements SubscriberInterface
 			}
 			*/
 			$str = $this->eventManager->publish('alerts.getAlerts', null, array(
-				'alertsOutput' => $this->alertsOutput,
+				'alerts' => $this->alertsOutput,
 				'output' => $str,
 			))['output'];
 		}
 		$this->alerts = array();
 		return $str;
 	}
+
+    public function getContentGenerators()
+    {
+        return array(
+            'getAlerts',
+        );
+    }
 
     /**
      * get subscribed events
@@ -169,7 +173,7 @@ class Alerts implements SubscriberInterface
     public function getSubscriptions()
     {
     	return array(
-			'page.output' => 'onOutput',
+			'tinyframe.renderComplete' => 'onRenderComplete',
     	);
     }
 
@@ -180,19 +184,19 @@ class Alerts implements SubscriberInterface
 	 *
 	 * @return void
 	 */
-	public function onOutput(Event $event)
+	public function onRenderComplete(Event $event)
 	{
-		$page = $event->getSubject();
-        if (Net::getHeaderValue('Content-Type') == 'text/html') {
+		$controller = $event->getSubject();
+        if ($event['response']->getHeaderLine('Content-Type') == 'text/html') {
             if (!empty($this->alerts)) {
-                if (!$page->content->isKeyOutput('alerts')) {
+                if (!$controller->content->isKeyOutput('alerts')) {
                     // alerts not output... adding alerts
                     $alerts = $this->getAlerts();
-                    $page->content->update('body', $alerts, 'top');
+                    $controller->content->update('body', $alerts, 'top');
                 } else {
                     // alerts already output -> replace
                     $this->alerts = \array_merge($this->alertsOutput, $this->alerts);
-                    $page->content->update('alerts', $this->getAlerts(), 'replace');
+                    $controller->content->update('alerts', $this->getAlerts(), 'replace');
                 }
             }
         }

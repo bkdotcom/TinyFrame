@@ -25,19 +25,44 @@ class Request extends ServerRequest
      */
     public static function fromGlobals()
     {
-        $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
-        $headers = getallheaders();
-        $uri = self::getUriFromGlobals();
-        $body = new LazyOpenStream('php://input', 'r+');
-        $protocol = isset($_SERVER['SERVER_PROTOCOL']) ? str_replace('HTTP/', '', $_SERVER['SERVER_PROTOCOL']) : '1.1';
+        $serverRequest = new static(
+            isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET', // method
+            self::getUriFromGlobals(),  // uri
+            \getallheaders(),
+            new LazyOpenStream('php://input', 'r+'), // request body
+            isset($_SERVER['SERVER_PROTOCOL'])
+                ? \str_replace('HTTP/', '', $_SERVER['SERVER_PROTOCOL'])
+                : '1.1',
+            $_SERVER
+        );
 
-        $serverRequest = new static($method, $uri, $headers, $body, $protocol, $_SERVER);
+        $contentType = $serverRequest->getHeader('Content-Type');
+        $contentType = \array_shift($contentType);
+        $contentType = \preg_replace('/^(.*?);.*/', '$1', $contentType);
+
+        $parsedBody = null;
+        if ($contentType === 'application/json') {
+            $input = \file_get_contents('php://input');
+            $parsedBody = \json_decode($input, true);
+        }
 
         return $serverRequest
             ->withCookieParams($_COOKIE)
+            ->withParsedBody($parsedBody ?: $_POST)
             ->withQueryParams($_GET)
-            ->withParsedBody($_POST)
             ->withUploadedFiles(self::normalizeFiles($_FILES));
+    }
+
+    /**
+     * Is this a secured request?
+     *
+     * Note: This method is not part of the PSR-7 standard.
+     *
+     * @return boolean
+     */
+    public function isSecure()
+    {
+        return $this->getServerParam('HTTPS') == 'on';
     }
 
 	/**
@@ -109,12 +134,11 @@ class Request extends ServerRequest
      */
     public function getParsedBodyParam($key, $default = null)
     {
-        $postParams = $this->getParsedBody();
         $result = $default;
-        if (\is_array($postParams) && isset($postParams[$key])) {
-            $result = $postParams[$key];
-        } elseif (\is_object($postParams) && \property_exists($postParams, $key)) {
-            $result = $postParams->$key;
+        if (\is_array($this->parsedBody) && isset($this->parsedBody[$key])) {
+            $result = $this->parsedBody[$key];
+        } elseif (\is_object($this->parsedBody) && \property_exists($this->parsedBody, $key)) {
+            $result = $this->parsedBody->$key;
         }
         return $result;
     }
