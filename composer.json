@@ -27,6 +27,6 @@
 		"bdk/toolbox": "dev-master",
         "aura/router": "~3.0",
         "guzzlehttp/psr7": "^1.6.1",
-		"pimple/pimple": "~3.0"
+		"pimple/pimple": "~3.2.0"
 	}
 }
